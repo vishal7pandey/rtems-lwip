@@ -1,0 +1,14 @@
+{
+	"header-paths-to-import": [
+		"rtemslwip/greth/include",
+		"rtemslwip/greth/leon3/include"
+	],
+	"source-files-to-import": [
+		"rtemslwip/greth/greth_netif.c",
+		"rtemslwip/greth/greth_phy.c",
+		"rtemslwip/greth/greth_mdio.c",
+		"rtemslwip/greth/greth_lwip.c",
+		"rtemslwip/greth/leon3/leon3_greth.c"
+
+	]
+}
