@@ -128,10 +128,12 @@ def build(bld):
     test_app_incl.extend(drv_incl)
     test_app_incl.extend(common_includes)
     test_app_incl.append('rtemslwip/test/')
+    # as per rtems-lwip issue #13, use of sethostid with GCC 15+ requires
+    # that the implicit function declaration warning be disabled
     bld.program(features='c',
                 target='networking01.exe',
                 source='rtemslwip/test/networking01/sample_app.c',
-                cflags='-g -Wall -O0',
+                cflags='-g -Wall -O0 -Wno-implicit-function-declaration',
                 install_path=None,
                 use='lwip',
                 lib=['rtemscpu', 'rtemsbsp', 'rtemstest', 'lwip'],
