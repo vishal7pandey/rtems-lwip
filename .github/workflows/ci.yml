@@ -1,0 +1,59 @@
+name: RTEMS lwIP CI
+
+on:
+  pull_request:
+    branches: [tc2/upgrade-base]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: read
+  security-events: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/vishal7pandey/anvil-sandbox-rtems:7
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Check out source and submodules
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Configure SPARC LEON3
+        run: ./waf configure --prefix=/opt/rtems/7 --rtems-tools=/opt/rtems/7/bin --rtems-bsps=sparc/leon3
+
+      - name: Build
+        run: ./waf
+
+  codeql:
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/vishal7pandey/anvil-sandbox-rtems:7
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: c-cpp
+          build-mode: manual
+
+      - name: Configure SPARC LEON3
+        run: ./waf configure --prefix=/opt/rtems/7 --rtems-tools=/opt/rtems/7/bin --rtems-bsps=sparc/leon3
+
+      - name: Build for CodeQL
+        run: ./waf
+
+      - name: Analyze
+        uses: github/codeql-action/analyze@v3
