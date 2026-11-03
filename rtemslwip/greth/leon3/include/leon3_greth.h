@@ -30,4 +30,5 @@
 #include <grlib/ambapp.h>
 #include <stdio.h>
 
-int rtems_lwip_leon3_greth_driver_attach();
+struct greth_netif_state;
+int rtems_lwip_leon3_greth_driver_attach(struct greth_netif_state *greth_chip);
