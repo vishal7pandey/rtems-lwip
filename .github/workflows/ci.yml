@@ -31,6 +31,7 @@ jobs:
           set -Eeuo pipefail
           mkdir -p logs
           docker run --rm \
+            --user 0 \
             --volume "$GITHUB_WORKSPACE:/workspace" \
             --workdir /workspace \
             --env RUN_TESTS=1 \

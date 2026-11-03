@@ -1,7 +1,25 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-git config --global --add safe.directory /workspace || true
+git config --global --add safe.directory "*" || true
+
+# If RTEMS 7 sparc/leon3 BSP is not already installed in /opt/rtems/7, build and install it now
+if [[ ! -f /opt/rtems/7/lib/pkgconfig/sparc-rtems7-leon3.pc ]]; then
+  echo "RTEMS 7 sparc/leon3 BSP not found in /opt/rtems/7; building and installing..."
+  RTEMS_SRC=$(mktemp -d /tmp/rtems-bsp.XXXXXX)
+  git clone --depth 1 https://github.com/vishal7pandey/rtems.git "${RTEMS_SRC}"
+  pushd "${RTEMS_SRC}"
+  cat <<'EOF' > config.ini
+[sparc/leon3]
+BUILD_TESTS = False
+EOF
+  ./waf configure --prefix=/opt/rtems/7
+  ./waf -j"$(nproc)"
+  ./waf install
+  popd
+  rm -rf "${RTEMS_SRC}"
+fi
+
 git submodule update --init
 
 ./waf configure \
