@@ -1,6 +1,6 @@
 [submodule "lwip-upstream"]
 	path = lwip-upstream
-	url = https://git.savannah.gnu.org/git/lwip.git
+	url = https://github.com/lwip-tcpip/lwip.git
 [submodule "rtems_waf"]
 	path = rtems_waf
 	url = https://gitlab.rtems.org/rtems/tools/rtems_waf.git
