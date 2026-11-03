@@ -1,0 +1,99 @@
+name: RTEMS lwIP CI
+
+on:
+  pull_request:
+    branches: [main, tc2/upgrade-base-leon3]
+  push:
+    branches: [main, tc2/upgrade-base-leon3]
+  workflow_dispatch:
+
+concurrency:
+  group: rtems-lwip-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build-test:
+    name: build-test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Run leon3 build and SIS tests
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mkdir -p logs
+          docker run --rm \
+            --user 0 \
+            --volume "$GITHUB_WORKSPACE:/workspace" \
+            --workdir /workspace \
+            --env RUN_TESTS=1 \
+            ghcr.io/vishal7pandey/anvil-sandbox-rtems:7 \
+            bash .github/scripts/build-leon3.sh 2>&1 | tee logs/build-test.log
+
+      - name: Upload build and test logs
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: leon3-build-test-logs
+          path: logs/
+          if-no-files-found: warn
+          retention-days: 14
+
+  codeql:
+    name: CodeQL (C/C++)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    container:
+      image: ghcr.io/vishal7pandey/anvil-sandbox-rtems:7
+      options: --user 0 --cap-add=SYS_PTRACE
+    steps:
+      - name: Install GitHub Action runtime
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update
+          apt-get install -y --no-install-recommends ca-certificates curl xz-utils
+          node_version=24.22.2
+          node_archive="node-v${node_version}-linux-x64.tar.xz"
+          node_url="https://nodejs.org/dist/v${node_version}"
+          curl -fsSL "${node_url}/${node_archive}" -o "/tmp/${node_archive}"
+          curl -fsSL "${node_url}/SHASUMS256.txt" -o /tmp/SHASUMS256.txt
+          grep "  ${node_archive}$" /tmp/SHASUMS256.txt | (cd /tmp && sha256sum --check --status)
+          tar -xJf "/tmp/${node_archive}" --strip-components=1 -C /usr/local
+          node --version
+
+      - name: Check out source
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: c-cpp
+          build-mode: manual
+
+      - name: Build leon3 for CodeQL
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          set -x
+          CODEQL_BUILD=1 bash .github/scripts/build-leon3.sh
+
+      - name: Analyze
+        uses: github/codeql-action/analyze@v4
+        with:
+          category: /language:c-cpp

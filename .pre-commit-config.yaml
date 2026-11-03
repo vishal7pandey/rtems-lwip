@@ -1,0 +1,32 @@
+repos:
+  # Local hooks only: the agent sandbox is offline after checkout, so pre-commit cannot fetch
+  # hook repositories from GitHub.
+  - repo: local
+    hooks:
+      - id: whitespace-staged
+        name: no whitespace errors in staged changes
+        entry: git diff --cached --check
+        language: system
+        pass_filenames: false
+        always_run: true
+
+      - id: clang-format-staged-lines
+        name: clang-format changed C/C++ lines
+        entry: anvil-clang-format-staged
+        language: system
+        pass_filenames: false
+        always_run: true
+
+      - id: cppcheck-changed-c
+        name: cppcheck changed C files
+        entry: cppcheck --enable=warning,performance,portability --error-exitcode=1
+        language: system
+        types: [c]
+
+      - id: commit-message-format
+        name: "commit message must start with KEY-123: (e.g. RTEMS-1: ...)"
+        entry: 'bash -c ''grep -Eq "^[A-Z]+-[0-9]+: .+" "$1"'' --'
+        language: system
+        stages: [commit-msg]
+        always_run: true
+        pass_filenames: true
