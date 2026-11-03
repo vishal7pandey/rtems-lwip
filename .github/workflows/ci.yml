@@ -97,3 +97,50 @@ jobs:
         uses: github/codeql-action/analyze@v4
         with:
           category: /language:c-cpp
+
+  sbom:
+    name: SBOM and vulnerability reports
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out PR tree
+        uses: actions/checkout@v6
+        with:
+          path: pr-tree
+          submodules: recursive
+
+      - name: Check out base tree
+        if: github.event_name == 'pull_request'
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.base_ref }}
+          path: base-tree
+          submodules: recursive
+
+      - name: Generate SBOM and OSV reports
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/reports"
+          docker pull ghcr.io/vishal7pandey/anvil-sandbox-rtems:7
+          BEFORE_VOL=""
+          BEFORE_ARG=""
+          if [[ -d "$GITHUB_WORKSPACE/base-tree" ]]; then
+            BEFORE_VOL="--volume $GITHUB_WORKSPACE/base-tree:/base:ro"
+            BEFORE_ARG="--before /base"
+          fi
+          docker run --rm \
+            --volume "$GITHUB_WORKSPACE/pr-tree:/workspace:ro" \
+            $BEFORE_VOL \
+            --volume "$RUNNER_TEMP/reports:/reports" \
+            --entrypoint bash \
+            ghcr.io/vishal7pandey/anvil-sandbox-rtems:7 \
+            /workspace/.github/scripts/sbom.sh /workspace /reports $BEFORE_ARG
+
+      - name: Upload SBOM and OSV reports
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: sbom-osv-${{ github.run_id }}
+          path: ${{ runner.temp }}/reports/
+          if-no-files-found: warn
