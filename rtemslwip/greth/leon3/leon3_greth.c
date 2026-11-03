@@ -31,8 +31,18 @@
 #include <stdio.h>
 #include "greth_emac.h"
 
-#define RDA_COUNT     32
-#define TDA_COUNT     32
+/*
+ * Tune GRETH descriptor ring sizes for sustained 100M RX without drops.
+ * - RX ring: 128 descriptors. With ~8kpps @ 100 Mbit/s (1500B frames),
+ *   a 32-entry ring under bursty traffic showed RX descriptor exhaustion.
+ *   128 provides ~16ms of buffering headroom for bursts while keeping
+ *   memory use modest on LEON3.
+ * - TX ring: 64 descriptors to match typical burst sizes without stalling TX.
+ *
+ * If needed for smaller-memory systems, consider making these configurable.
+ */
+#define RDA_COUNT     128
+#define TDA_COUNT     64
 
 greth_configuration_t leon_greth_configuration;
 

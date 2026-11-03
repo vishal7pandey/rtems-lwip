@@ -122,7 +122,7 @@ static err_t greth_init_hw(struct netif *netif);
 static void greth_print_init_info(struct greth_netif_state *nf_state);
 static void 
 greth_hw_set_hwaddr(struct greth_netif_state *greth_dev, uint8_t *macAddr);
-static void greth_rx_pbuf_refill(struct greth_netif_state *nf_state);
+static bool greth_rx_pbuf_refill(struct greth_netif_state *nf_state);
 
 /* C. Transmission related Functions */
 static err_t greth_process_irq_tx(void *arg);
@@ -416,12 +416,19 @@ err_t greth_init_dev_and_lwip_netif(struct netif *netif)
                           initialized successfully\n", curr_test, total_tests);
 
   nf_state->rx_channel.head = 0;
-  for(int i=0; i<nf_state->num_rx_bd; i++){
-    greth_rx_pbuf_refill(nf_state);
+  int refill_ok = 1;
+  for ( int i = 0; i < nf_state->num_rx_bd; i++ ) {
+    if ( !greth_rx_pbuf_refill( nf_state ) ) {
+      refill_ok = 0;
+    }
   }
   ++curr_test;
-  iprintf("[%d/%d] greth_init_dev_and_lwip_netif: GRETH RX PBUFs refilled \
+  if ( refill_ok ) {
+    iprintf("[%d/%d] greth_init_dev_and_lwip_netif: GRETH RX PBUFs refilled \
                                       successfully\n", curr_test, total_tests);
+  } else {
+    iprintf("[WRN] greth_init_dev_and_lwip_netif: Some RX pbuf refills failed\n");
+  }
 
   if ((retVal = greth_install_interrupt_handlers(nf_state)) != ERR_OK) {
     iprintf("greth_install_interrupt_handlers (ERR): %d\n", retVal);
@@ -765,7 +772,7 @@ static void greth_hw_set_hwaddr(struct greth_netif_state *greth_dev,
  *       - GRETH_RXD_WRAP   : Set only for the last descriptor in the ring
  * @note Uses `pbuf_alloc()` to allocate memory for incoming Ethernet frames.
  */
-static void greth_rx_pbuf_refill(struct greth_netif_state *nf_state)
+static bool greth_rx_pbuf_refill(struct greth_netif_state *nf_state)
 {
   struct rx_comm_chn *rxch = &nf_state->rx_channel;
   uint32_t head = rxch->head;
@@ -775,7 +782,7 @@ static void greth_rx_pbuf_refill(struct greth_netif_state *nf_state)
       iprintf("[ERR] greth_rx_pbuf_refill: pbuf_alloc failed at head=%u\n", \
                                                                           head);
       rxch->rx_pbuf_ref[head] = NULL;
-      return;
+      return false;
   }
 
   rxch->rx_pbuf_ref[head] = p;
@@ -793,6 +800,7 @@ static void greth_rx_pbuf_refill(struct greth_netif_state *nf_state)
 
   greth_debug_printf("[RX-REFILL] BD[%u] -> pbuf=%p payload=%p len=%u \
         ctrl=0x%X\n", head, p, p->payload, p->len, rxch->desc_array[head].ctrl);
+  return true;
 }
 
 /***********************Transmission related Functions************************/
@@ -1228,7 +1236,7 @@ static void greth_process_irq_rx(struct netif* ntf)
 {
   struct greth_netif_state* nf_state = (struct greth_netif_state*) ntf->state;
   struct rx_comm_chn *rxch = &nf_state->rx_channel;
-  unsigned int len_status, pkt_len, bad=0;
+  unsigned int len_status, pkt_len;
   struct pbuf *p;
   rtems_interrupt_lock_context level;
 
@@ -1236,42 +1244,46 @@ static void greth_process_irq_rx(struct netif* ntf)
 
   while (!((len_status = GRETH_MEM_LOAD(&rxch->desc_array[rxch->head].ctrl)) 
                                                           & GRETH_RXD_ENABLE)) {
-    if (len_status & GRETH_RXD_TOOLONG) { ++nf_state->rxLengthError; bad=1; }
-    if (len_status & GRETH_RXD_DRIBBLE) { ++nf_state->rxNonOctet;    bad=1; }
-    if (len_status & GRETH_RXD_CRCERR)  { ++nf_state->rxBadCRC;      bad=1; }
-    if (len_status & GRETH_RXD_OVERRUN) { ++nf_state->rxOverrun;     bad=1; }
-    if (len_status & GRETH_RXD_LENERR)  { ++nf_state->rxLengthError; bad=1; }
+    unsigned int bad = 0; /* reset per-descriptor */
+
+    if (len_status & GRETH_RXD_TOOLONG) { ++nf_state->rxLengthError; bad = 1; }
+    if (len_status & GRETH_RXD_DRIBBLE) { ++nf_state->rxNonOctet;    bad = 1; }
+    if (len_status & GRETH_RXD_CRCERR)  { ++nf_state->rxBadCRC;      bad = 1; }
+    if (len_status & GRETH_RXD_OVERRUN) { ++nf_state->rxOverrun;     bad = 1; }
+    if (len_status & GRETH_RXD_LENERR)  { ++nf_state->rxLengthError; bad = 1; }
 
     if (!bad) {
       greth_debug_printf("[DBG] rxch->head => %d\n", rxch->head);
       pkt_len = len_status & 0x7FF;
       p = rxch->rx_pbuf_ref[rxch->head];
 
-      LINK_STATS_INC(link.recv);          
+      LINK_STATS_INC(link.recv);
 
       p->len = p->tot_len = pkt_len;
       if (ntf->input(p, ntf) != ERR_OK) {
-          LINK_STATS_INC(link.memerr);
-          LINK_STATS_INC(link.drop);
-          pbuf_free(p);
+        LINK_STATS_INC(link.memerr);
+        LINK_STATS_INC(link.drop);
+        pbuf_free(p);
       }
-      greth_rx_pbuf_refill(nf_state);
-    } 
-    else {
+      /* Refill this descriptor and advance head */
+      if ( !greth_rx_pbuf_refill( nf_state ) ) {
+        /* Out of pbufs: break to avoid spinning on a disabled BD */
+        break;
+      }
+    } else {
       pbuf_free(rxch->rx_pbuf_ref[rxch->head]);
-      greth_rx_pbuf_refill(nf_state);
+      /* Refill this descriptor and advance head */
+      if ( !greth_rx_pbuf_refill( nf_state ) ) {
+        /* Out of pbufs: break to avoid spinning on a disabled BD */
+        break;
+      }
     }
-
-    if (rxch->head == nf_state->num_rx_bd - 1)
-        rxch->desc_array[rxch->head].ctrl = GRETH_RXD_ENABLE | GRETH_RXD_IRQ 
-                                                              | GRETH_RXD_WRAP;
-    else
-        rxch->desc_array[rxch->head].ctrl = GRETH_RXD_ENABLE | GRETH_RXD_IRQ;
 
     greth_debug_printf("rxch incremented head => %d\n", rxch->head);
     greth_debug_printf("rxch new pbuf => %x\n", \
                                             rxch->desc_array[rxch->head].addr);
 
+    /* Ensure receiver stays enabled */
     rtems_interrupt_lock_acquire(&nf_state->isr_lock, &level);
     nf_state->regs->ctrl |= GRETH_CTRL_RXEN;
     rtems_interrupt_lock_release(&nf_state->isr_lock, &level);
